@@ -35,39 +35,79 @@
 #define MINPRESSURE 10
 #define MAXPRESSURE 1000
 
-String mChannelTitle = "";
-String mSongTitle = "";
-String mAlbumTitle = "";
+#define DRAW_MIN_X 0
+#define DRAW_MIN_Y 0
+#define DRAW_MAX_X 240
+#define DRAW_MAX_Y 320
+
+String mChannelTitle = "Channel";
+String mSongTitle = "Song Title";
+String mAlbumTitle = "Album Title";
 int mSongDurationMinutes = 0;
 int mSongDurationSeconds = 0;
 int mSongPositionMinutes = 0;
 int mSongPositionSeconds = 0;
-
+bool mButtonDown = false;
+int mLastTouchX = -1;
+int mLastTouchY = -1;
+unsigned long mLastTouchEventTime = 0;
 
 // For better pressure precision, we need to know the resistance
 // between X+ and X- Use any multimeter to read it
 // For the one we're using, its 300 ohms across the X plate
-TouchScreen ts = TouchScreen(XP, YP, XM, YM, 300);
+TouchScreen touchScreen = TouchScreen(XP, YP, XM, YM, 300);
 CmdMessenger cmdMessenger = CmdMessenger(Serial1);
 
+#define LINE_HEIGHT 30
+#define LINE_POSITION 320
+#define FONT_SIZE 3
+#define LINE_BUFFER_SIZE 13
 void paintLine(int line, String text) {
-  char buffer[13];
-  memset(buffer, 0, 13);
-  text.toCharArray(buffer, 13);
-  Tft.drawString(buffer, line * 30, 320, 3, WHITE);
+  char buffer[LINE_BUFFER_SIZE];
+  memset(buffer, 0, LINE_BUFFER_SIZE);
+  text.toCharArray(buffer, LINE_BUFFER_SIZE);
+  Tft.drawString(buffer, line * LINE_HEIGHT, LINE_POSITION, FONT_SIZE, WHITE);
 }
 
+#define BUTTON_WIDTH 120
+#define BUTTON_HEIGHT 60
+#define BUTTON_TEXT_POSITION 200
+void paintUpButton() {
+  Tft.fillRectangle(DRAW_MAX_X - BUTTON_HEIGHT, 
+                    DRAW_MIN_Y + BUTTON_WIDTH, 
+                    BUTTON_HEIGHT, 
+                    BUTTON_WIDTH, 
+                    GREEN);
+  Tft.drawString("UP", BUTTON_TEXT_POSITION, 75, FONT_SIZE, BLACK);
+}
+
+void paintDownButton() {
+  Tft.fillRectangle(DRAW_MAX_X - BUTTON_HEIGHT, 
+                    DRAW_MAX_Y, 
+                    BUTTON_HEIGHT, 
+                    BUTTON_WIDTH, 
+                    RED);
+  Tft.drawString("DOWN", BUTTON_TEXT_POSITION, 310, FONT_SIZE, BLACK);
+}
+
+#define CHANNEL_TITLE_LINE 0
+#define SONG_TITLE_LINE 1
+#define ALBUM_TITLE_LINE 2
+#define TIME_LINE 3
 void repaint() {
   Tft.paintScreenBlack();
-  paintLine(0, mChannelTitle);
-  paintLine(1, mSongTitle);
-  paintLine(2, mAlbumTitle);
-  char buffer[13];
-  memset(buffer, 0, 13);
+  paintLine(CHANNEL_TITLE_LINE, mChannelTitle);
+  paintLine(SONG_TITLE_LINE, mSongTitle);
+  paintLine(ALBUM_TITLE_LINE, mAlbumTitle);
+  char buffer[LINE_BUFFER_SIZE];
+  memset(buffer, 0, LINE_BUFFER_SIZE);
   sprintf(buffer, " %02d:%02d/%02d:%02d", 
     mSongPositionMinutes, mSongPositionSeconds, mSongDurationMinutes, mSongDurationSeconds);
   String timeString(buffer);
-  paintLine(3, timeString);
+  paintLine(TIME_LINE, timeString);
+  paintUpButton();
+  paintDownButton();
+
 }
 
 // Enumerated definition of support commands
@@ -177,11 +217,6 @@ void setup(void) {
   Tft.setOrientation(0);
   Serial.println("Switching display direction...");
   Tft.setDisplayDirect(DOWN2UP);
-  Serial.println("Drawing text to screen...");
-  Tft.drawString("Channel", 0, 320, 3, WHITE);
-  Tft.drawString("Song Title", 30, 320, 3, WHITE);
-  Tft.drawString("Album Title", 60, 320, 3, WHITE);
-  Tft.drawString("00:00 / 00:00", 90, 320, 3, WHITE);
   
   Serial.println("Initializing serial port 1...");
   Serial1.begin(115200);
@@ -191,26 +226,66 @@ void setup(void) {
 
   Serial.println("Attaching command callbacks...");
   attachCommandCallbacks();
+
+  Serial.println("Painting...");
+  repaint();
 }
 
+#define DOWN_BUTTON_TOUCH_X_MIN 185
+#define DOWN_BUTTON_TOUCH_Y_MIN 165
+#define DOWN_BUTTON_TOUCH_X_MAX 300
+#define DOWN_BUTTON_TOUCH_Y_MAX 430
+bool isDownButton(int x, int y) {
+  Serial.print();
+  return (x >= DOWN_BUTTON_TOUCH_X_MIN) &&
+         (x <= DOWN_BUTTON_TOUCH_X_MAX) &&
+         (y >= DOWN_BUTTON_TOUCH_Y_MIN) &&
+         (y <= DOWN_BUTTON_TOUCH_Y_MAX);
+}
+
+#define UP_BUTTON_TOUCH_X_MIN 185
+#define UP_BUTTON_TOUCH_Y_MIN 635
+#define UP_BUTTON_TOUCH_X_MAX 300
+#define UP_BUTTON_TOUCH_Y_MAX 915
+bool isUpButton(int x, int y) {
+  return (x >= UP_BUTTON_TOUCH_X_MIN) &&
+         (x <= UP_BUTTON_TOUCH_X_MAX) &&
+         (y >= UP_BUTTON_TOUCH_Y_MIN) &&
+         (y <= UP_BUTTON_TOUCH_Y_MAX);
+}
+
+#define BUTTON_EVENT_DELAY 1000
 void loop(void) {
   // Process incoming serial data, and perform callbacks
   cmdMessenger.feedinSerialData();
 
-  // a point object holds x y and z coordinates
-  Point p = ts.getPoint();
-  
-  // we have some minimum pressure we consider 'valid'
-  // pressure of 0 means no pressing!
-  if (p.z > MINPRESSURE && p.z < MAXPRESSURE) {
-    Serial.print("X = "); 
-    Serial.print(p.x);
-    Serial.print("\tY = "); 
-    Serial.print(p.y);
-    Serial.print("\tPressure = "); 
-    Serial.println(p.z);
-
-    cmdMessenger.sendCmd(CMD_SET_CHANNEL_TITLE, "Testing");
+  int currentTime = millis();
+  if (currentTime >= mLastTouchEventTime + BUTTON_EVENT_DELAY) {
+    // Record when a touch event begins
+    if (touchScreen.pressure() >= 10) {
+      if (!mButtonDown) {
+        Serial.println("Touch event starting.");
+      }
+      mButtonDown = true;
+      mLastTouchX = touchScreen.readTouchX();
+      mLastTouchY = touchScreen.readTouchY();
+    }
+    else {
+      if (mButtonDown) {
+        Serial.println("Touch event ended.");
+        // The touch event has ended
+        mButtonDown = false;
+        if (isUpButton(mLastTouchX, mLastTouchY)) {
+          cmdMessenger.sendCmd(CMD_ACTION_THUMBS_UP, "Thumbs Up");
+        }
+        if (isDownButton(mLastTouchX, mLastTouchY)) {
+          cmdMessenger.sendCmd(CMD_ACTION_THUMBS_DOWN, "Thumbs Down");
+        }
+        mLastTouchEventTime = currentTime;
+      }
+      mLastTouchX = -1;
+      mLastTouchY = -1;
+    }
   }
 
 }

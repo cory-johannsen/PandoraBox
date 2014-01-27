@@ -2,6 +2,7 @@
 import enum
 import Adafruit_BBIO.GPIO as GPIO
 import time
+import logging
 
 REGISTER = enum.enum(INSTRUCTION=0,DATA=1)
 
@@ -110,6 +111,7 @@ class Display(object):
     def __init__(self, lineCount=4, characterCount=20, 
             dataGpioPins=("P8_12", "P8_14", "P8_16", "P8_18", "P8_11", "P8_13", "P8_15", "P8_17"), 
             registerSelectPin="P8_28", enablePin="P8_30"):
+        self.logger = logging.getLogger('PandoraBox.Display')
         self.lineCount = lineCount
         self.characterCount = characterCount
         self.dataGpioPins = dataGpioPins
@@ -118,12 +120,12 @@ class Display(object):
 
 
     def __configureGPIO(self):
-        print "[Display]  Configuring register select pin " + self.registerSelectPin + " for output"
+        self.logger.info("Configuring register select pin " + self.registerSelectPin + " for output")
         GPIO.setup(self.registerSelectPin, GPIO.OUT)
-        print "[Display]  Configuring enable pin " + self.enablePin + " for output"
+        self.logger.info("Configuring enable pin " + self.enablePin + " for output")
         GPIO.setup(self.enablePin, GPIO.OUT)
         for i in range(0, 8):
-            print "[Display]  Configuring data pin " + self.dataGpioPins[i] + " for output as D" + str(i)
+            self.logger.info("Configuring data pin " + self.dataGpioPins[i] + " for output as D" + str(i))
             GPIO.setup(self.dataGpioPins[i], GPIO.OUT)
 
 
@@ -159,22 +161,22 @@ class Display(object):
 
 
     def initialize(self):
-        print "[Display] Beginning initialization"
+        self.logger.info("Beginning initialization")
         self.__configureGPIO()
         time.sleep(0.1)
-        print "[Display]   Clearing display"
+        self.logger.info("Clearing display")
         self.__writeByte(Display.CLEAR_DISPLAY, REGISTER.INSTRUCTION)
         time.sleep(0.5)
-        print "[Display]   Returning to home"
+        self.logger.info("Returning to home")
         self.__writeByte(Display.RETURN_HOME, REGISTER.INSTRUCTION)
         time.sleep(0.1)
-        print "[Display]   Enabling cursor with blink"
+        self.logger.info("Enabling cursor with blink")
         self.__writeByte(Display.DISPLAY_ON, REGISTER.INSTRUCTION)
         time.sleep(0.1)
-        print "[Display]   Invoking function set"
+        self.logger.info("Invoking function set")
         self.__writeByte(Display.FUNCTION_SET_TWO_LINE, REGISTER.INSTRUCTION)
         time.sleep(0.1)
-        print "[Display] Initialization complete."
+        self.logger.info("Initialization complete.")
 
 
     def setPosition(self, line, position):
@@ -190,11 +192,12 @@ class Display(object):
 
 
     def write(self, character):
-        # print "print: ", character
+        # self.logger.info("print: ", character
         self.__writeByte(Display.CGRAM_ADDRESS_MAP[character], REGISTER.DATA)
 
 
     def writeString(self, string):
+        self.logger.debug("Write string: %s", string)
         for i in range(len(string)):
             self.write(string[i])
 

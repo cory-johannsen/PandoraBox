@@ -8,7 +8,7 @@ import display
 import signal
 import os
 import switch
-import logging
+import logging 
 
 PandoraEvent = enum.enum(
         ARTIST_BOOKMARK="artistbookmark", 
@@ -26,7 +26,8 @@ PandoraEvent = enum.enum(
         STATION_DELETE="stationdelete",
         STATION_FETCH_PLAYLIST="stationfetchplaylist", 
         STATION_QUICK_MIX_TOGGLE="stationquickmixtoggle", 
-        STATION_RENAME="stationrename")
+        STATION_RENAME="stationrename",
+        PANDORA_CONTROLLER_QUIT="pandoracontrollerquit")
 
 
 PandoraData = enum.enum(
@@ -37,6 +38,11 @@ PandoraData = enum.enum(
         SONG_DURATION="songDuration",
         SONG_PLAYED="songPlayed")
 
+PandoraCommand = enum.enum(
+        NEXT_SONG="n",
+        PAUSE="p",
+        LOVE="+",
+        BAN="-")
 
 class PandoraController(object):
     STATION_TITLE_POSITION={"line":0,"position":0} 
@@ -47,7 +53,8 @@ class PandoraController(object):
 
     def __init__(self, eventFifo="/home/ubuntu/.config/pandorabox/events", 
             commandFifo='/home/ubuntu/.config/pianobar/ctl'):
-        #print "__init__ entered"
+        #self.logger.info("__init__ entered"
+        self.logger = logging.getLogger('PandoraBox.PandoraController')
         self.isRunning = True
         self.stationTitle = "Station Name"
         self.stationId = ""
@@ -67,7 +74,7 @@ class PandoraController(object):
 
 
     def start(self):
-        print "[PandoraController] start entered"
+        self.logger.info("Starting execution.")
         self.isRunning = True
 
         self.display.initialize()
@@ -90,93 +97,142 @@ class PandoraController(object):
         self.inputEventThread = threading.Thread(target=self.processInputEvents)
         self.inputEventThread.start()
 
-        print "[PandoraController] start completed"
+        self.logger.info("Execution initiated.")
 
 
     def stop(self):
-        print "[PandoraController] stop entered"
+        self.logger.info("Stopping execution.")
         self.isRunning = False
 
 
     def join(self):
-        print "[PandoraController] join entered"
+        self.logger.info("join entered")
         self.commandThread.join()
-        self.pianobarEventThread.join()
         self.inputEventThread.join()
         self.displayThread.join()
-        print "[PandoraController] join completed"
+        # launch a terminator thread that will close the event FIFO if it is still open
+        # after a timeout.  This works around the blocking nature of the FIFO
+        self.fifoTerminatorThread = threading.Thread(target=self.fifoTerminator)
+        self.fifoTerminatorThread.start()
+        self.pianobarEventThread.join()
+        self.logger.info("join completed")
+
+
+    def fifoTerminator(self):
+        time.sleep(5)
+        with open(self.eventFifoPath, 'w') as fifo:
+            fifo.write(PandoraEvent.PANDORA_CONTROLLER_QUIT)
+            fifo.close()
 
 
     def processInputEvents(self):
-        print "[PandoraController] Input Event processing thread executing."
+        self.logger.info("Input Event processing thread executing.")
         self.navigationSwitch.initialize()
         self.navigationSwitch.start(self.eventQueue)
         while self.isRunning:
             try:
                 event = self.eventQueue.get(block=True, timeout=5)
                 if event == switch.SwitchPosition.UP:
-                    print "[PandoraController] UP switch event recieved."
+                    self.logger.info("UP switch event recieved.")
+                    try:
+                        self.commandQueue.put(PandoraCommand.NEXT_SONG, block=True, timeout=5)
+                    except Queue.Full:
+                        pass
+                elif event == switch.SwitchPosition.DOWN:
+                    self.logger.info("DOWN switch event recieved.")
+                    try:
+                        self.commandQueue.put(PandoraCommand.PAUSE, block=True, timeout=5)
+                    except Queue.Full:
+                        pass
+                elif event == switch.SwitchPosition.LEFT:
+                    self.logger.info("LEFT switch event recieved.")
+                    try:
+                        self.commandQueue.put(PandoraCommand.BAN, block=True, timeout=5)
+                    except Queue.Full:
+                        pass
+                elif event == switch.SwitchPosition.RIGHT:
+                    self.logger.info("RIGHT switch event recieved.")
+                    try:
+                        self.commandQueue.put(PandoraCommand.LOVE, block=True, timeout=5)
+                    except Queue.Full:
+                        pass
+                elif event == switch.SwitchPosition.CENTER:
+                    self.logger.info("CENTER switch event recieved.")
+                    try:
+                        self.commandQueue.put(PandoraCommand.NEXT_SONG, block=True, timeout=5)
+                    except Queue.Full:
+                        pass
 
             except Queue.Empty:
                 pass
         self.navigationSwitch.stop()
-        print "[PandoraController] Input Event processing thread executing."
+        self.logger.info("Input Event processing thread terminated.")
 
 
 
     def processPianobarEvents(self):
-        print "[PandoraController] Pianobar Event processing thread executing."
+        self.logger.info("Pianobar Event processing thread executing.")
         while self.isRunning and self.isPianobarEventThreadRunning:
             # self.eventFifo = open(self.eventFifoPath, "r")
             with open(self.eventFifoPath, 'r') as fifo:
-                print "[PandoraController.processPianobarEvents] eventFifo is opened."
+                self.logger.debug("eventFifo is opened.")
                 nextEvent = fifo.read().strip()
-                # print("[PandoraController.processEvents] event: %s\n" % (nextEvent,))
+                # print("processEvents] event: %s\n" % (nextEvent,))
                 tokens = nextEvent.split("\n")
-                # print("[PandoraController.processEvents] tokens: %s" % (tokens,))
+                # print("processEvents] tokens: %s" % (tokens,))
                 event = tokens[0]
-                # print "[PandoraController.processPianobarEvents]     event: ", event
+                # self.logger.info("processPianobarEvents]     event: ", event
                 if event == PandoraEvent.SONG_START:
-                    # print "[PandoraController.processPianobarEvents] SONG_START event intercepted"
+                    # self.logger.info("processPianobarEvents] SONG_START event intercepted"
                     del(tokens[0])
                     for dataParameter in tokens:
-                        # print "[PandoraController.processPianobarEvents]   data parameter: ", dataParameter
+                        # self.logger.info("processPianobarEvents]   data parameter: ", dataParameter
                         parameterName = dataParameter.split("=")[0]
                         parameterValue = dataParameter.split("=")[1]
-                        # print "[PandoraController.processPianobarEvents]     name: ", parameterName
-                        # print "[PandoraController.processPianobarEvents]     value: ", parameterValue
+                        # self.logger.info("processPianobarEvents]     name: ", parameterName
+                        # self.logger.info("processPianobarEvents]     value: ", parameterValue
                         if parameterName == PandoraData.STATION_NAME:
+                            self.logger.debug("Station name: ", parameterValue)
                             self.stationTitle = parameterValue
                         elif parameterName == PandoraData.ARTIST:
+                            self.logger.debug("Artist: ", parameterValue)
                             self.artist = parameterValue
                         elif parameterName == PandoraData.TITLE:
+                            self.logger.debug("Song title: ", parameterValue)
                             self.songTitle = parameterValue
                         elif parameterName == PandoraData.ALBUM:
+                            self.logger.debug("Album title: ", parameterValue)
                             self.albumTitle = parameterValue
-        print "[PandoraController] Pianobar Event processing thread terminated."
+                elif event == PandoraEvent.PANDORA_CONTROLLER_QUIT:
+                    self.logger.info("Terminate event received.");
+                    self.isPianobarEventThreadRunning = False
+        self.logger.info("Pianobar Event processing thread terminated.")
 
 
     def processCommands(self):
-        print "[PandoraController] Command processing thread executing."
+        self.logger.info("Command processing thread executing.")
         # self.commandFifo = open(self.commandFifoPath, "w")
         while self.isRunning and self.isCommandThreadRunning:
-            # print("[PandorController.processCommands]  isRunning: %s, isCommandThreadRunning: %s" % (self.isRunning, self.isCommandThreadRunning))
-            time.sleep(1)
-        print "[PandoraController] Command processing thread terminated."
+            try:
+                command = self.commandQueue.get(block=True, timeout=5)
+                self.logger.info("Processing command %s", command)
+                commandFifo = open(self.commandFifoPath, "w")
+                commandFifo.write(command)
+                commandFifo.close()
+            except Queue.Empty:
+                pass
+        self.logger.info("Command processing thread terminated.")
 
 
     def refreshDisplay(self):
-        print "[PandoraController] Display thread executing"
+        self.logger.info("Display thread executing")
         lastStationTitle = ""
         lastSongTitle = ""
         lastArtist = ""
         lastAlbum = ""
-        cycleCounter = 0
         while self.isRunning and self.isDisplayThreadRunning:
-            # if cycleCounter >= 10:
-            #     cycleCounter = 0
-            if self.stationTitle != lastStationTitle or cycleCounter == 0:
-                print("Station name change.  Was: %s, Now: %s" % (lastStationTitle, self.stationTitle))
+            if self.stationTitle != lastStationTitle:
+                self.logger.debug("Station name change.  Was: %s, Now: %s", lastStationTitle, self.stationTitle)
                 self.display.setPosition(PandoraController.STATION_TITLE_POSITION["line"], PandoraController.STATION_TITLE_POSITION["position"])
                 stationTitle = self.stationTitle.ljust(20, ' ')
                 if len(stationTitle) > 20:
@@ -184,8 +240,8 @@ class PandoraController(object):
                 self.display.writeString(stationTitle)
                 lastStationTitle = self.stationTitle
 
-            if self.songTitle != lastSongTitle or cycleCounter == 0:
-                print("Song title change.  Was: %s, Now: %s" % (lastSongTitle, self.songTitle))
+            if self.songTitle != lastSongTitle:
+                self.logger.debug("Song title change.  Was: %s, Now: %s", lastSongTitle, self.songTitle)
                 songTitle = self.songTitle.ljust(20, ' ')
                 if len(songTitle) > 20:
                     songTitle = songTitle[:20]
@@ -193,8 +249,8 @@ class PandoraController(object):
                 self.display.writeString(songTitle)
                 lastSongTitle = self.songTitle
 
-            if self.artist != lastArtist or cycleCounter == 0:
-                print("Artist change.  Was: %s, Now: %s" % (lastArtist, self.artist))
+            if self.artist != lastArtist:
+                self.logger.debug("Artist change.  Was: %s, Now: %s", lastArtist, self.artist)
                 artist = self.artist.ljust(20, ' ')
                 if len(artist) > 20:
                     artist = artist[:20]
@@ -202,27 +258,26 @@ class PandoraController(object):
                 self.display.writeString(artist)
                 lastArtist = self.artist
 
-            if self.albumTitle != lastAlbum or cycleCounter == 0: 
-                print("Album name change.  Was: %s, Now: %s" % (lastAlbum, self.albumTitle))
+            if self.albumTitle != lastAlbum: 
+                self.logger.debug("Album name change.  Was: %s, Now: %s", lastAlbum, self.albumTitle)
                 album = self.albumTitle.ljust(20, ' ')
                 if len(album) > 20:
                     album = album[:20]
                 self.display.setPosition(PandoraController.ALBUM_TITLE_POSITION["line"], PandoraController.ALBUM_TITLE_POSITION["position"])
                 self.display.writeString(album)
                 lastAlbum = self.albumTitle
-            # self.display.setPosition(PandoraController.TIME_POSITION["line"], PandoraController.TIME_POSITION["position"])
-            # posMins = "{0:02d}".format(self.positionMinutes)
-            # posSecs = "{0:02d}".format(self.positionSeconds)
-            # durMins = "{0:02d}".format(self.durationMinutes)
-            # durSecs = "{0:02d}".format(self.durationSeconds)
-            # self.display.writeString(posMins + ":" + posSecs + "/" + durMins  + ":" + durSecs)
-            cycleCounter += 1
             time.sleep(1)
-        print "[PandoraController] Display thread terminating"
+        self.logger.info("Display thread terminating")
 
 
 def main():
-    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger('PandoraBox')
+    logger.setLevel(level=logging.INFO)
+    consoleHandler = logging.StreamHandler()
+    formatter = logging.Formatter('[%(name)s] %(levelname)s - %(message)s')
+    consoleHandler.setFormatter(formatter)
+    logger.addHandler(consoleHandler)
+
     pandoraController = PandoraController()
 
     pandoraController.start()
@@ -231,11 +286,11 @@ def main():
         try :
             time.sleep(1)
         except KeyboardInterrupt:
-            logging.info("Keyboard interrupt detected.")
+            logger.info("Keyboard interrupt detected.")
             pandoraController.stop();
 
     pandoraController.join()
-    logging.info("Exiting.")
+    logger.info("Exiting.")
 
 if __name__ == '__main__':
     main()

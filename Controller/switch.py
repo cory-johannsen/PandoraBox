@@ -17,6 +17,7 @@ class NavigationSwitch(object):
                                 SwitchPosition.LEFT:"P8_43", 
                                 SwitchPosition.RIGHT:"P8_45", 
                                 SwitchPosition.CENTER:"P8_4"}):
+        self.logger = logging.getLogger('PandoraBox.NavigationSwitch')
         self.gpioPins = gpioPins
         self.pinStates = {SwitchPosition.UP:GPIO.LOW, 
                         SwitchPosition.DOWN:GPIO.LOW,
@@ -36,15 +37,15 @@ class NavigationSwitch(object):
 
 
     def __configureGPIO(self):
-        logging.info("[NavigationSwitch]  UP pin " + self.gpioPins[SwitchPosition.UP] + " for input")
+        self.logger.info("UP pin " + self.gpioPins[SwitchPosition.UP] + " for input")
         GPIO.setup(self.gpioPins[SwitchPosition.UP], GPIO.IN, GPIO.PUD_UP)
-        logging.info("[NavigationSwitch]  DOWN pin " + self.gpioPins[SwitchPosition.DOWN] + " for input")
+        self.logger.info("DOWN pin " + self.gpioPins[SwitchPosition.DOWN] + " for input")
         GPIO.setup(self.gpioPins[SwitchPosition.DOWN], GPIO.IN, GPIO.PUD_UP)
-        logging.info("[NavigationSwitch]  LEFT pin " + self.gpioPins[SwitchPosition.LEFT] + " for input")
+        self.logger.info("LEFT pin " + self.gpioPins[SwitchPosition.LEFT] + " for input")
         GPIO.setup(self.gpioPins[SwitchPosition.LEFT], GPIO.IN, GPIO.PUD_UP)
-        logging.info("[NavigationSwitch]  RIGHT pin " + self.gpioPins[SwitchPosition.RIGHT] + " for input")
+        self.logger.info("RIGHT pin " + self.gpioPins[SwitchPosition.RIGHT] + " for input")
         GPIO.setup(self.gpioPins[SwitchPosition.RIGHT], GPIO.IN, GPIO.PUD_UP)
-        logging.info("[NavigationSwitch]  CENTER pin " + self.gpioPins[SwitchPosition.CENTER] + " for input")
+        self.logger.info("CENTER pin " + self.gpioPins[SwitchPosition.CENTER] + " for input")
         GPIO.setup(self.gpioPins[SwitchPosition.CENTER], GPIO.IN, GPIO.PUD_UP)
 
 
@@ -55,13 +56,13 @@ class NavigationSwitch(object):
 
 
     def __switchMonitor(self, switchPosition):
-        logging.info("[NavigationSwitch] switch monitor engaged for %s", switchPosition)
+        self.logger.info("switch monitor engaged for %s", switchPosition)
         lastPinState = self.pinStates[switchPosition]
         while self.pinThreadRunning[switchPosition]:
             pinState = GPIO.input(self.gpioPins[switchPosition])
             if pinState != lastPinState:
-                logging.info("[NavigationSwitch]  switch state change detected for %s", switchPosition)
-                logging.debug("[NavigationSwitch]  pin state: %s", pinState)
+                self.logger.debug("switch state change detected for %s", switchPosition)
+                self.logger.debug("pin state: %s", pinState)
                 self.pinStates[switchPosition] = pinState
                 lastPinState = pinState
                 if pinState:
@@ -70,12 +71,12 @@ class NavigationSwitch(object):
                     except Queue.Full:
                         pass
             time.sleep(0.1)
-        logging.info("[NavigationSwitch] switch monitor terminated for %s", switchPosition)
+        self.logger.info("switch monitor terminated for %s", switchPosition)
 
 
 
     def initialize(self):
-        logging.info("[NavigationSwitch] Beginning initialization")
+        self.logger.info("Beginning initialization")
         self.__configureGPIO()
         time.sleep(0.1)
         self.pinStates[SwitchPosition.UP] = GPIO.input(self.gpioPins[SwitchPosition.UP])
@@ -83,12 +84,12 @@ class NavigationSwitch(object):
         self.pinStates[SwitchPosition.LEFT] = GPIO.input(self.gpioPins[SwitchPosition.LEFT])
         self.pinStates[SwitchPosition.RIGHT] = GPIO.input(self.gpioPins[SwitchPosition.RIGHT])
         self.pinStates[SwitchPosition.CENTER] = GPIO.input(self.gpioPins[SwitchPosition.CENTER])
-        logging.info("[NavigationSwitch]   initial pin states: %s", self.pinStates)
-        logging.info("[NavigationSwitch] Initialization complete.")
+        self.logger.info("initial pin states: %s", self.pinStates)
+        self.logger.info("Initialization complete.")
 
 
     def start(self, eventQueue):
-        logging.info("[NavigationSwitch] start - Initiating pin monitors.")
+        self.logger.info("start - Initiating pin monitors.")
         self.eventQueue = eventQueue
         # set up a thread for each switch that will wait for an edge and then update the internal state variable
         self.__startPinMonitor(SwitchPosition.UP, self.upSwitchMonitor)
@@ -96,7 +97,7 @@ class NavigationSwitch(object):
         self.__startPinMonitor(SwitchPosition.LEFT, self.leftSwitchMonitor)
         self.__startPinMonitor(SwitchPosition.RIGHT, self.rightSwitchMonitor)
         self.__startPinMonitor(SwitchPosition.CENTER, self.centerSwitchMonitor)
-        logging.info("[NavigationSwitch] start - pin monitors active.")
+        self.logger.info("start - pin monitors active.")
 
 
     def stop(self):
@@ -125,91 +126,6 @@ class NavigationSwitch(object):
 
     def centerSwitchMonitor(self):
         self.__switchMonitor(SwitchPosition.CENTER)
-
-
-    def simpleUpSwitchMonitor(self):
-        print "[NavigationSwitch] Simple UP switch monitor thread beginning execution."
-        lastPinState = self.pinStates[SwitchPosition.UP]
-        print "[NavigationSwitch]  pinThreadRunning: ", self.pinThreadRunning[SwitchPosition.UP]
-        while self.pinThreadRunning[SwitchPosition.UP]:
-            pinState = GPIO.input(self.gpioPins[SwitchPosition.UP])
-            if pinState != lastPinState:
-                print "[NavigationSwitch] Simple UP switch state change detected."
-                print "[NavigationSwitch]  pin state: ", pinState
-                self.pinStates[SwitchPosition.UP] = pinState
-                lastPinState = pinState
-                if pinState:
-                    try:
-                        self.eventQueue.put(SwitchPosition.UP, block=True, timeout=5)
-                    except Queue.Full:
-                        pass
-            time.sleep(0.1)
-
-        print "[NavigationSwitch] Simple UP switch monitor thread terminating."
-
-
-    def oldUpSwitchMonitor(self):
-        print "[NavigationSwitch] UP switch monitor thread beginning execution."
-        lastPinState = self.pinStates[SwitchPosition.UP]
-        while self.pinThreadRunning[SwitchPosition.UP]:
-            pinState = GPIO.input(self.gpioPins[SwitchPosition.UP])
-            if pinState != lastPinState:
-                print("[NavigationSwitch]  switch state change detected for %s ", SwitchPosition.UP)
-                print "[NavigationSwitch]  pin state: ", pinState
-                self.pinStates[SwitchPosition.UP] = pinState
-                lastPinState = pinState
-                if pinState:
-                    try:
-                        self.eventQueue.put(SwitchPosition.UP, block=True, timeout=5)
-                    except Queue.Full:
-                        pass
-
-            time.sleep(0.1)
-        print "[NavigationSwitch] UP switch monitor thread terminating."
-
-
-    def oldDownSwitchMonitor(self):
-        GPIO.add_event_detect(self.gpioPins[SwitchPosition.DOWN], GPIO.FALLING)
-        while self.pinThreadRunning[SwitchPosition.DOWN]:
-            if GPIO.event_detected(self.gpioPins[SwitchPosition.DOWN]):
-                print "[NavigationSwitch] DOWN switch edge detected."
-                self.pinStates[SwitchPosition.DOWN] = GPIO.LOW
-            else:
-                self.pinStates[SwitchPosition.DOWN] = GPIO.HIGH
-            time.sleep(0.1)
-
-
-    def oldLeftSwitchMonitor(self):
-        GPIO.add_event_detect(self.gpioPins[SwitchPosition.LEFT], GPIO.FALLING)
-        while self.pinThreadRunning[SwitchPosition.LEFT]:
-            if GPIO.event_detected(self.gpioPins[SwitchPosition.LEFT]):
-                print "[NavigationSwitch] LEFT switch edge detected."
-                self.pinStates[SwitchPosition.LEFT] = GPIO.LOW
-            else:
-                self.pinStates[SwitchPosition.LEFT] = GPIO.HIGH
-            time.sleep(0.1)
-
-
-    def oldRightSwitchMonitor(self):
-        GPIO.add_event_detect(self.gpioPins[SwitchPosition.RIGHT], GPIO.FALLING)
-        while self.pinThreadRunning[SwitchPosition.RIGHT]:
-            if GPIO.event_detected(self.gpioPins[SwitchPosition.RIGHT]):
-                print "[NavigationSwitch] RIGHT switch edge detected."
-                self.pinStates[SwitchPosition.RIGHT] = GPIO.LOW
-            else:
-                self.pinStates[SwitchPosition.RIGHT] = GPIO.HIGH
-            time.sleep(0.1)
-
-
-    def oldCenterSwitchMonitor(self):
-        GPIO.add_event_detect(self.gpioPins[SwitchPosition.CENTER], GPIO.FALLING)
-        while self.pinThreadRunning[SwitchPosition.CENTER]:
-            if GPIO.event_detected(self.gpioPins[SwitchPosition.CENTER]):
-                print "[NavigationSwitch] CENTER switch edge detected."
-                self.pinStates[SwitchPosition.CENTER] = GPIO.LOW
-            else:
-                self.pinStates[SwitchPosition.CENTER] = GPIO.HIGH
-            time.sleep(0.1)
 
 
     def upActive(self):

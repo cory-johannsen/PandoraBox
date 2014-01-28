@@ -169,7 +169,7 @@ class Display(object):
         self.__writeByte(Display.RETURN_HOME, REGISTER.INSTRUCTION)
         time.sleep(0.1)
         print "[Display]   Enabling cursor with blink"
-        self.__writeByte(Display.DISPLAY_ON_WITH_BLINK_CURSOR, REGISTER.INSTRUCTION)
+        self.__writeByte(Display.DISPLAY_ON, REGISTER.INSTRUCTION)
         time.sleep(0.1)
         print "[Display]   Invoking function set"
         self.__writeByte(Display.FUNCTION_SET_TWO_LINE, REGISTER.INSTRUCTION)

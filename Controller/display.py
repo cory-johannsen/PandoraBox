@@ -118,12 +118,12 @@ class Display(object):
 
 
     def __configureGPIO(self):
-        print "  Configuring register select pin " + self.registerSelectPin + " for output"
+        print "[Display]  Configuring register select pin " + self.registerSelectPin + " for output"
         GPIO.setup(self.registerSelectPin, GPIO.OUT)
-        print "  Configuring enable pin " + self.enablePin + " for output"
+        print "[Display]  Configuring enable pin " + self.enablePin + " for output"
         GPIO.setup(self.enablePin, GPIO.OUT)
         for i in range(0, 8):
-            print "  Configuring data pin " + self.dataGpioPins[i] + " for output as D" + str(i)
+            print "[Display]  Configuring data pin " + self.dataGpioPins[i] + " for output as D" + str(i)
             GPIO.setup(self.dataGpioPins[i], GPIO.OUT)
 
 
@@ -133,19 +133,19 @@ class Display(object):
 
     def __writeByte(self, dataBits, registerSelect):
         self.__setGpio(self.enablePin, 1)
-        time.sleep(0.01)
+        #time.sleep(0.01)
         self.__setGpio(self.registerSelectPin, registerSelect)
         for i in range(0, 8):
            self.__setGpio(self.dataGpioPins[i], dataBits[i]) 
-        time.sleep(0.01)
+        #time.sleep(0.01)
         self.__setGpio(self.enablePin, 0)
-        time.sleep(0.01)
+        #time.sleep(0.01)
            
 
     def __setAddress(self, address):
-        print("setAddress: address=%s" % (address,))
+        # print("setAddress: address=%s" % (address,))
         binAddress = ('1') + format(address, '07b')
-        print("  binAddress: %s" % (binAddress,))
+        # print("  binAddress: %s" % (binAddress,))
         ddramAddress = (int(binAddress[7]), 
                 int(binAddress[6]), 
                 int(binAddress[5]), 
@@ -154,31 +154,31 @@ class Display(object):
                 int(binAddress[2]), 
                 int(binAddress[1]), 
                 int(binAddress[0]))
-        print("  ddramAddress: %s" % (ddramAddress,))
+        # print("  ddramAddress: %s" % (ddramAddress,))
         self.__writeByte(ddramAddress, REGISTER.INSTRUCTION)
 
 
     def initialize(self):
-        print "Beginning initialization"
+        print "[Display] Beginning initialization"
         self.__configureGPIO()
         time.sleep(0.1)
-        print "  Clearing display"
+        print "[Display]   Clearing display"
         self.__writeByte(Display.CLEAR_DISPLAY, REGISTER.INSTRUCTION)
         time.sleep(0.5)
-        print "  Returning to home"
+        print "[Display]   Returning to home"
         self.__writeByte(Display.RETURN_HOME, REGISTER.INSTRUCTION)
         time.sleep(0.1)
-        print "  Enabling cursor with blink"
+        print "[Display]   Enabling cursor with blink"
         self.__writeByte(Display.DISPLAY_ON_WITH_BLINK_CURSOR, REGISTER.INSTRUCTION)
         time.sleep(0.1)
-        print "  Invoking function set"
+        print "[Display]   Invoking function set"
         self.__writeByte(Display.FUNCTION_SET_TWO_LINE, REGISTER.INSTRUCTION)
         time.sleep(0.1)
-        print "Initialization complete."
+        print "[Display] Initialization complete."
 
 
     def setPosition(self, line, position):
-        print("setPosition: line=%s, position=%s" % (line, position))
+        # print("setPosition: line=%s, position=%s" % (line, position))
         address = position
         if line == 1:
             address += 64
@@ -190,7 +190,7 @@ class Display(object):
 
 
     def write(self, character):
-        print "print: ", character
+        # print "print: ", character
         self.__writeByte(Display.CGRAM_ADDRESS_MAP[character], REGISTER.DATA)
 
 

@@ -1,13 +1,14 @@
 #!/usr/bin/python
 import subprocess
-import threading
-import time
+import multiprocessing
 import Queue
+import time
 import enum
 import display
 import signal
 import os
 import switch
+import rotary
 import logging 
 
 PandoraEvent = enum.enum(
@@ -67,10 +68,11 @@ class PandoraController(object):
         self.positionSeconds = 0
         self.display = display.Display()
         self.navigationSwitch = switch.NavigationSwitch()
+        self.rotaryEncoder = rotary.RotaryEncoder()
         self.eventFifoPath = eventFifo
         self.commandFifoPath = commandFifo
-        self.eventQueue = Queue.Queue()
-        self.commandQueue = Queue.Queue()
+        self.eventQueue = multiprocessing.Queue()
+        self.commandQueue = multiprocessing.Queue()
 
 
     def start(self):
@@ -79,22 +81,22 @@ class PandoraController(object):
 
         self.display.initialize()
         self.isDisplayThreadRunning = True
-        self.displayThread = threading.Thread(target=self.refreshDisplay)
+        self.displayThread = multiprocessing.Process(target=self.refreshDisplay)
         # self.displayThread.daemon = True
         self.displayThread.start()
 
         self.isPianobarEventThreadRunning = True
-        self.pianobarEventThread = threading.Thread(target=self.processPianobarEvents)
+        self.pianobarEventThread = multiprocessing.Process(target=self.processPianobarEvents)
         # self.eventThread.daemon = True
         self.pianobarEventThread.start()
 
         self.isCommandThreadRunning = True
-        self.commandThread = threading.Thread(target=self.processCommands)
+        self.commandThread = multiprocessing.Process(target=self.processCommands)
         # self.commandThread.daemon = True
         self.commandThread.start()
 
         self.isInputEventThreadRunning = True
-        self.inputEventThread = threading.Thread(target=self.processInputEvents)
+        self.inputEventThread = multiprocessing.Process(target=self.processInputEvents)
         self.inputEventThread.start()
 
         self.logger.info("Execution initiated.")
@@ -129,6 +131,8 @@ class PandoraController(object):
         self.logger.info("Input Event processing thread executing.")
         self.navigationSwitch.initialize()
         self.navigationSwitch.start(self.eventQueue)
+        self.rotaryEncoder.initialize()
+        self.rotaryEncoder.start(self.eventQueue)
         while self.isRunning:
             try:
                 event = self.eventQueue.get(block=True, timeout=5)
@@ -162,10 +166,13 @@ class PandoraController(object):
                         self.commandQueue.put(PandoraCommand.NEXT_SONG, block=True, timeout=5)
                     except Queue.Full:
                         pass
+                else:
+                    self.logger.info("Input event received: %s", event)
 
             except Queue.Empty:
                 pass
         self.navigationSwitch.stop()
+        self.rotaryEncoder.stop()
         self.logger.info("Input Event processing thread terminated.")
 
 

@@ -1,5 +1,6 @@
 #!/usr/bin/python
 import subprocess
+import threading
 import multiprocessing
 import Queue
 import time
@@ -43,7 +44,10 @@ PandoraCommand = enum.enum(
         NEXT_SONG="n",
         PAUSE="p",
         LOVE="+",
-        BAN="-")
+        BAN="-",
+        QUIT="q",
+        VOLUME_UP=")",
+        VOLUME_DOWN="(")
 
 class PandoraController(object):
     STATION_TITLE_POSITION={"line":0,"position":0} 
@@ -81,23 +85,29 @@ class PandoraController(object):
 
         self.display.initialize()
         self.isDisplayThreadRunning = True
-        self.displayThread = multiprocessing.Process(target=self.refreshDisplay)
-        # self.displayThread.daemon = True
+        self.displayThread = threading.Thread(target=self.refreshDisplay)
+        self.displayThread.daemon = True
         self.displayThread.start()
 
         self.isPianobarEventThreadRunning = True
-        self.pianobarEventThread = multiprocessing.Process(target=self.processPianobarEvents)
-        # self.eventThread.daemon = True
+        self.pianobarEventThread = threading.Thread(target=self.processPianobarEvents)
+        self.pianobarEventThread.daemon = True
         self.pianobarEventThread.start()
 
         self.isCommandThreadRunning = True
-        self.commandThread = multiprocessing.Process(target=self.processCommands)
-        # self.commandThread.daemon = True
+        self.commandThread = threading.Thread(target=self.processCommands)
+        self.commandThread.daemon = True
         self.commandThread.start()
 
         self.isInputEventThreadRunning = True
-        self.inputEventThread = multiprocessing.Process(target=self.processInputEvents)
+        self.inputEventThread = threading.Thread(target=self.processInputEvents)
+        self.inputEventThread.daemon = True
         self.inputEventThread.start()
+
+        self.isPianobarThreadRunning = True
+        self.pianobarThread = threading.Thread(target=self.pianobarThread)
+        # self.pianobarThread.daemon = True
+        self.pianobarThread.start()
 
         self.logger.info("Execution initiated.")
 
@@ -137,25 +147,25 @@ class PandoraController(object):
             try:
                 event = self.eventQueue.get(block=True, timeout=5)
                 if event == switch.SwitchPosition.UP:
-                    self.logger.info("UP switch event recieved.")
+                    self.logger.info("UP switch event received.")
                     try:
                         self.commandQueue.put(PandoraCommand.NEXT_SONG, block=True, timeout=5)
                     except Queue.Full:
                         pass
                 elif event == switch.SwitchPosition.DOWN:
-                    self.logger.info("DOWN switch event recieved.")
+                    self.logger.info("DOWN switch event received.")
                     try:
                         self.commandQueue.put(PandoraCommand.PAUSE, block=True, timeout=5)
                     except Queue.Full:
                         pass
                 elif event == switch.SwitchPosition.LEFT:
-                    self.logger.info("LEFT switch event recieved.")
+                    self.logger.info("LEFT switch event received.")
                     try:
                         self.commandQueue.put(PandoraCommand.BAN, block=True, timeout=5)
                     except Queue.Full:
                         pass
                 elif event == switch.SwitchPosition.RIGHT:
-                    self.logger.info("RIGHT switch event recieved.")
+                    self.logger.info("RIGHT switch event received.")
                     try:
                         self.commandQueue.put(PandoraCommand.LOVE, block=True, timeout=5)
                     except Queue.Full:
@@ -164,6 +174,18 @@ class PandoraController(object):
                     self.logger.info("CENTER switch event recieved.")
                     try:
                         self.commandQueue.put(PandoraCommand.NEXT_SONG, block=True, timeout=5)
+                    except Queue.Full:
+                        pass
+                elif event == rotary.Direction.CLOCKWISE:
+                    self.logger.info("CLOCKWISE rotary event recieved.")
+                    try:
+                        self.commandQueue.put(PandoraCommand.VOLUME_UP, block=True, timeout=5)
+                    except Queue.Full:
+                        pass
+                elif event == rotary.Direction.COUNTER_CLOCKWISE:
+                    self.logger.info("COUNTER_CLOCKWISE rotary event recieved.")
+                    try:
+                        self.commandQueue.put(PandoraCommand.VOLUME_DOWN, block=True, timeout=5)
                     except Queue.Full:
                         pass
                 else:
@@ -199,16 +221,16 @@ class PandoraController(object):
                         # self.logger.info("processPianobarEvents]     name: ", parameterName
                         # self.logger.info("processPianobarEvents]     value: ", parameterValue
                         if parameterName == PandoraData.STATION_NAME:
-                            self.logger.debug("Station name: ", parameterValue)
+                            self.logger.debug("Station name: %s", parameterValue)
                             self.stationTitle = parameterValue
                         elif parameterName == PandoraData.ARTIST:
-                            self.logger.debug("Artist: ", parameterValue)
+                            self.logger.debug("Artist: %s", parameterValue)
                             self.artist = parameterValue
                         elif parameterName == PandoraData.TITLE:
-                            self.logger.debug("Song title: ", parameterValue)
+                            self.logger.debug("Song title: %s", parameterValue)
                             self.songTitle = parameterValue
                         elif parameterName == PandoraData.ALBUM:
-                            self.logger.debug("Album title: ", parameterValue)
+                            self.logger.debug("Album title: %s", parameterValue)
                             self.albumTitle = parameterValue
                 elif event == PandoraEvent.PANDORA_CONTROLLER_QUIT:
                     self.logger.info("Terminate event received.");
@@ -238,8 +260,12 @@ class PandoraController(object):
         lastArtist = ""
         lastAlbum = ""
         while self.isRunning and self.isDisplayThreadRunning:
+            self.logger.debug("Display thread: station: %s", self.stationTitle)
+            self.logger.debug("Display thread: song: %s", self.songTitle)
+            self.logger.debug("Display thread: artist: %s", self.artist)
+            self.logger.debug("Display thread: album: %s", self.albumTitle)
             if self.stationTitle != lastStationTitle:
-                self.logger.debug("Station name change.  Was: %s, Now: %s", lastStationTitle, self.stationTitle)
+                self.logger.info("Station name change.  Was: %s, Now: %s", lastStationTitle, self.stationTitle)
                 self.display.setPosition(PandoraController.STATION_TITLE_POSITION["line"], PandoraController.STATION_TITLE_POSITION["position"])
                 stationTitle = self.stationTitle.ljust(20, ' ')
                 if len(stationTitle) > 20:
@@ -248,7 +274,7 @@ class PandoraController(object):
                 lastStationTitle = self.stationTitle
 
             if self.songTitle != lastSongTitle:
-                self.logger.debug("Song title change.  Was: %s, Now: %s", lastSongTitle, self.songTitle)
+                self.logger.info("Song title change.  Was: %s, Now: %s", lastSongTitle, self.songTitle)
                 songTitle = self.songTitle.ljust(20, ' ')
                 if len(songTitle) > 20:
                     songTitle = songTitle[:20]
@@ -257,7 +283,7 @@ class PandoraController(object):
                 lastSongTitle = self.songTitle
 
             if self.artist != lastArtist:
-                self.logger.debug("Artist change.  Was: %s, Now: %s", lastArtist, self.artist)
+                self.logger.info("Artist change.  Was: %s, Now: %s", lastArtist, self.artist)
                 artist = self.artist.ljust(20, ' ')
                 if len(artist) > 20:
                     artist = artist[:20]
@@ -266,7 +292,7 @@ class PandoraController(object):
                 lastArtist = self.artist
 
             if self.albumTitle != lastAlbum: 
-                self.logger.debug("Album name change.  Was: %s, Now: %s", lastAlbum, self.albumTitle)
+                self.logger.info("Album name change.  Was: %s, Now: %s", lastAlbum, self.albumTitle)
                 album = self.albumTitle.ljust(20, ' ')
                 if len(album) > 20:
                     album = album[:20]
@@ -275,6 +301,12 @@ class PandoraController(object):
                 lastAlbum = self.albumTitle
             time.sleep(1)
         self.logger.info("Display thread terminating")
+
+
+    def pianobarThread(self):
+        self.logger.info("Starting pianobar subprocess.")
+        subprocess.call("/usr/bin/pianobar")
+        self.logger.info("pianobar subprocess dead.")
 
 
 def main():

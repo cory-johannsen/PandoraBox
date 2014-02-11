@@ -8,12 +8,14 @@ import sys
 
 EncoderChannel = enum.enum(A="A", B="B")
 Direction = enum.enum(CLOCKWISE="CW", COUNTER_CLOCKWISE="CCW")
+Click = enum.enum(CLICK="CLICK",UNCLICK="UNCLICK")
 
 class RotaryEncoder(object):
 
 
-    def __init__(self, gpioPins={EncoderChannel.A:"P8_39", 
-                                EncoderChannel.B:"P8_40"},
+    def __init__(self, gpioPins={EncoderChannel.A:"P8_29", 
+                                EncoderChannel.B:"P8_30",
+                                Click.CLICK:"P8_32"},
                                 debounceTimeout=0.50):
         self.logger = logging.getLogger('PandoraBox.RotaryEncoder')
         self.gpioPins = gpioPins
@@ -27,6 +29,8 @@ class RotaryEncoder(object):
         GPIO.setup(self.gpioPins[EncoderChannel.A], GPIO.IN)
         self.logger.info("Configuring B pin " + self.gpioPins[EncoderChannel.B] + " for input")
         GPIO.setup(self.gpioPins[EncoderChannel.B], GPIO.IN)
+        self.logger.info("Configuring Click pin " + self.gpioPins[Click.CLICK] + " for input")
+        GPIO.setup(self.gpioPins[Click.CLICK], GPIO.IN)
 
 
     def initialize(self):
@@ -35,7 +39,8 @@ class RotaryEncoder(object):
         time.sleep(0.1)
         pinStateA = GPIO.input(self.gpioPins[EncoderChannel.A])
         pinStateB = GPIO.input(self.gpioPins[EncoderChannel.B])
-        self.logger.info("initial pin states: A: %s, B: %s", pinStateA, pinStateB)
+        pinStateClick = GPIO.input(self.gpioPins[Click.CLICK])
+        self.logger.info("initial pin states: A: %s, B: %s, Click: %s", pinStateA, pinStateB, pinStateClick)
         self.logger.info("Initialization complete.")
 
 
@@ -45,12 +50,18 @@ class RotaryEncoder(object):
         self.pinThreadRunning = True
         self.pinThread = multiprocessing.Process(target=self.encoderMonitor)
         self.pinThread.start()
+
+        self.isClickThreadRunning = True
+        self.clickThread = multiprocessing.Process(target=self.clickMonitor)
+        self.clickThread.start()
         self.logger.info("start - pin monitors active.")
 
 
     def stop(self):
         self.pinThreadRunning = False
         self.pinThread.terminate()
+        self.isClickThreadRunning = False
+        self.clickThread.terminate()
 
 
     def encoderMonitor(self):
@@ -76,18 +87,26 @@ class RotaryEncoder(object):
                     except Queue.Full:
                         pass
                 previousTime = currentTime
-
-            #     if GPIO.input(self.gpioPins[EncoderChannel.B]):
-            #         self.logger.info("RISING EDGE - HIGH signal on channel %s, delta: %s", EncoderChannel.B, timeDelta)
-            #     else:
-            #         self.logger.info("FALLING EDGE - LOW signal channel %s, delta: %s", EncoderChannel.B, timeDelta)
-            #     previousEventTime = currentEventTime
-            # else:
-            #     self.logger.debug("bounce")
-
-
-
         self.logger.info("encoder monitor terminated")
+
+
+    def clickMonitor(self):
+        self.logger.info("click monitor engaged")
+        previousTime = time.time()
+        while self.isClickThreadRunning:
+            GPIO.wait_for_edge(self.gpioPins[Click.CLICK], GPIO.RISING)
+            currentTime = time.time()
+            timeDelta = currentTime - previousTime
+
+            if timeDelta >= self.debounceTimeout:
+                self.logger.info("CLICK")
+                try:
+                    self.eventQueue.put(Click.CLICK, block=True, timeout=5)
+                except Queue.Full:
+                    pass
+                previousTime = currentTime
+        self.logger.intfo("click monitor terminated")
+
 
 
     def clockwiseActive(self):

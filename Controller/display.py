@@ -109,8 +109,8 @@ class Display(object):
          }
 
     def __init__(self, lineCount=4, characterCount=20, 
-            dataGpioPins=("P8_12", "P8_14", "P8_16", "P8_18", "P8_11", "P8_13", "P8_15", "P8_17"), 
-            registerSelectPin="P8_28", enablePin="P8_30"):
+            dataGpioPins=("P8_43", "P8_44", "P8_41", "P8_42", "P8_39", "P8_40", "P8_37", "P8_38"), 
+            registerSelectPin="P8_45", enablePin="P8_46"):
         self.logger = logging.getLogger('PandoraBox.Display')
         self.lineCount = lineCount
         self.characterCount = characterCount
@@ -134,11 +134,14 @@ class Display(object):
 
 
     def __writeByte(self, dataBits, registerSelect):
+        GPIO.setup(self.enablePin, GPIO.OUT)
         self.__setGpio(self.enablePin, 1)
         #time.sleep(0.01)
+        GPIO.setup(self.registerSelectPin, GPIO.OUT)
         self.__setGpio(self.registerSelectPin, registerSelect)
         for i in range(0, 8):
-           self.__setGpio(self.dataGpioPins[i], dataBits[i]) 
+            GPIO.setup(self.dataGpioPins[i], GPIO.OUT)
+            self.__setGpio(self.dataGpioPins[i], dataBits[i]) 
         #time.sleep(0.01)
         self.__setGpio(self.enablePin, 0)
         #time.sleep(0.01)
@@ -197,7 +200,7 @@ class Display(object):
 
 
     def writeString(self, string):
-        self.logger.debug("Write string: %s", string)
+        self.logger.info("Write string: %s", string)
         for i in range(len(string)):
             self.write(string[i])
 

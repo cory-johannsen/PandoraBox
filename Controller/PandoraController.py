@@ -29,6 +29,7 @@ PandoraEvent = enum.enum(
         STATION_FETCH_PLAYLIST="stationfetchplaylist", 
         STATION_QUICK_MIX_TOGGLE="stationquickmixtoggle", 
         STATION_RENAME="stationrename",
+        USER_GET_STATIONS="usergetstations",
         PANDORA_CONTROLLER_QUIT="pandoracontrollerquit")
 
 
@@ -38,7 +39,8 @@ PandoraData = enum.enum(
         ALBUM="album",
         STATION_NAME="stationName",
         SONG_DURATION="songDuration",
-        SONG_PLAYED="songPlayed")
+        SONG_PLAYED="songPlayed",
+        STATION_COUNT="stationCount")
 
 PandoraCommand = enum.enum(
         NEXT_SONG="n",
@@ -47,29 +49,71 @@ PandoraCommand = enum.enum(
         BAN="-",
         QUIT="q",
         VOLUME_UP=")",
-        VOLUME_DOWN="(")
+        VOLUME_DOWN="(",
+        STATION_CHANGE="s")
+
+
+class Screen(object):
+
+
+    def __init__(self, itemList=["","","",""]):
+        self.logger = logging.getLogger('PandoraBox.Screen')
+        self.itemList = itemList
+        self.scrollIndex = 0
+
+
+    def items(self):
+        return self.itemList
+
+
+    def setItems(self, itemList):
+        self.itemList = itemList
+
+
+    def getVisibleItems(self):
+        self.logger.debug("[getVisibleItems] scrollIndex: %s", str(self.scrollIndex))
+        self.logger.debug("[getVisibleItems] list length: %s", str(len(self.itemList)))
+        if self.scrollIndex <= len(self.itemList) - 4:
+            return self.itemList[self.scrollIndex:]
+        else:
+            remainderIndex = 4 - (len(self.itemList) - self.scrollIndex)
+            self.logger.debug("[getVisibleItems] remainderIndex: %s", str(remainderIndex))
+            return self.itemList[self.scrollIndex:] + self.itemList[0:remainderIndex]
+
+
+    def scrollUp(self):
+        if self.scrollIndex >= len(self.itemList):
+            self.scrollIndex = 0
+        else:
+            self.scrollIndex += 1
+
+
+    def scrollDown(self):
+        if self.scrollIndex == 0:
+            self.scrollIndex = len(self.itemList) - 1
+        else:
+            self.scrollIndex -= 1
+
+
+    def getSelectedIndex(self):
+        return self.scrollIndex
+
+
+    def setSelectedIndex(self, selectedIndex):
+        self.scrollIndex = selectedIndex
+
 
 class PandoraController(object):
-    STATION_TITLE_POSITION={"line":0,"position":0} 
-    SONG_TITLE_POSITION={"line":1,"position":0}
-    ARTIST_POSITION={"line":2,"position":0} 
-    ALBUM_TITLE_POSITION={"line":3,"position":0} 
-    TIME_POSITION={"line":3,"position":0} 
+    LINE_1_POSITION={"line":0,"position":0} 
+    LINE_2_POSITION={"line":1,"position":0}
+    LINE_3_POSITION={"line":2,"position":0} 
+    LINE_4_POSITION={"line":3,"position":0} 
 
     def __init__(self, eventFifo="/home/ubuntu/.config/pandorabox/events", 
             commandFifo='/home/ubuntu/.config/pianobar/ctl'):
         #self.logger.info("__init__ entered"
         self.logger = logging.getLogger('PandoraBox.PandoraController')
         self.isRunning = True
-        self.stationTitle = "Station Name"
-        self.stationId = ""
-        self.songTitle = "Song Title"
-        self.artist = "Artist"
-        self.albumTitle = "Album"
-        self.durationMinutes = 0
-        self.durationSeconds = 0
-        self.positionMinutes = 0
-        self.positionSeconds = 0
         self.display = display.Display()
         self.navigationSwitch = switch.NavigationSwitch()
         self.rotaryEncoder = rotary.RotaryEncoder()
@@ -77,6 +121,10 @@ class PandoraController(object):
         self.commandFifoPath = commandFifo
         self.eventQueue = multiprocessing.Queue()
         self.commandQueue = multiprocessing.Queue()
+        self.songScreen = Screen(itemList=["--------------------", "PandoraBox", "Version 1.0", "--------------------"])
+        self.stationScreen = Screen(itemList=["--------------------", "PandoraBox", "Version 1.0", "--------------------"])
+        self.currentScreen = self.stationScreen
+        self.isPlaying = False
 
 
     def start(self):
@@ -173,19 +221,42 @@ class PandoraController(object):
                 elif event == switch.SwitchPosition.CENTER:
                     self.logger.info("CENTER switch event recieved.")
                     try:
-                        self.commandQueue.put(PandoraCommand.NEXT_SONG, block=True, timeout=5)
+                        self.commandQueue.put(PandoraCommand.PAUSE, block=True, timeout=5)
                     except Queue.Full:
                         pass
                 elif event == rotary.Direction.CLOCKWISE:
                     self.logger.info("CLOCKWISE rotary event recieved.")
                     try:
-                        self.commandQueue.put(PandoraCommand.VOLUME_UP, block=True, timeout=5)
+                        if self.currentScreen == self.songScreen:
+                            self.commandQueue.put(PandoraCommand.VOLUME_UP, block=True, timeout=5)
+                        else:
+                            self.stationScreen.scrollUp()
                     except Queue.Full:
                         pass
                 elif event == rotary.Direction.COUNTER_CLOCKWISE:
                     self.logger.info("COUNTER_CLOCKWISE rotary event recieved.")
                     try:
-                        self.commandQueue.put(PandoraCommand.VOLUME_DOWN, block=True, timeout=5)
+                        if self.currentScreen == self.songScreen:
+                            self.commandQueue.put(PandoraCommand.VOLUME_DOWN, block=True, timeout=5)
+                        else:
+                            self.stationScreen.scrollDown()
+                    except Queue.Full:
+                        pass
+                elif event == rotary.Click.CLICK:
+                    self.logger.info("CLICK rotary event recieved.")
+                    try:
+                        if self.currentScreen == self.songScreen:
+                            self.logger.info("Current screen is Song screen.  Setting to Station List screen.")
+                            self.currentScreen = self.stationScreen
+                            self.commandQueue.put(PandoraCommand.STATION_CHANGE, block=True, timeout=5)
+                        else:
+                            self.logger.info("Current screen is Station List screen.  Setting to Song screen.")
+                            self.currentScreen = self.songScreen
+                            changeStationCommand = PandoraCommand.STATION_CHANGE + str(self.stationScreen.getSelectedIndex())
+                            if not self.isPlaying:
+                                self.isPlaying = True
+                                changeStationCommand = str(self.stationScreen.getSelectedIndex())
+                            self.commandQueue.put(changeStationCommand, block=True, timeout=5)
                     except Queue.Full:
                         pass
                 else:
@@ -202,36 +273,53 @@ class PandoraController(object):
     def processPianobarEvents(self):
         self.logger.info("Pianobar Event processing thread executing.")
         while self.isRunning and self.isPianobarEventThreadRunning:
-            # self.eventFifo = open(self.eventFifoPath, "r")
             with open(self.eventFifoPath, 'r') as fifo:
                 self.logger.debug("eventFifo is opened.")
                 nextEvent = fifo.read().strip()
-                # print("processEvents] event: %s\n" % (nextEvent,))
                 tokens = nextEvent.split("\n")
-                # print("processEvents] tokens: %s" % (tokens,))
+                self.logger.debug("[processPianobarEvents] tokens: %s" % (tokens,))
                 event = tokens[0]
-                # self.logger.info("processPianobarEvents]     event: ", event
+                self.logger.info("[processPianobarEvents]     event: %s", event)
                 if event == PandoraEvent.SONG_START:
-                    # self.logger.info("processPianobarEvents] SONG_START event intercepted"
+                    self.logger.debug("[processPianobarEvents] SONG_START event intercepted")
                     del(tokens[0])
                     for dataParameter in tokens:
-                        # self.logger.info("processPianobarEvents]   data parameter: ", dataParameter
                         parameterName = dataParameter.split("=")[0]
                         parameterValue = dataParameter.split("=")[1]
-                        # self.logger.info("processPianobarEvents]     name: ", parameterName
-                        # self.logger.info("processPianobarEvents]     value: ", parameterValue
                         if parameterName == PandoraData.STATION_NAME:
                             self.logger.debug("Station name: %s", parameterValue)
-                            self.stationTitle = parameterValue
+                            self.songScreen.items()[0] = parameterValue
                         elif parameterName == PandoraData.ARTIST:
                             self.logger.debug("Artist: %s", parameterValue)
-                            self.artist = parameterValue
+                            self.songScreen.items()[1] = parameterValue
                         elif parameterName == PandoraData.TITLE:
                             self.logger.debug("Song title: %s", parameterValue)
-                            self.songTitle = parameterValue
+                            self.songScreen.items()[2] = parameterValue
                         elif parameterName == PandoraData.ALBUM:
                             self.logger.debug("Album title: %s", parameterValue)
-                            self.albumTitle = parameterValue
+                            self.songScreen.items()[3] = parameterValue
+                elif event == PandoraEvent.USER_GET_STATIONS:
+                    self.logger.info("[processPianobarEvents] USER_GET_STATIONS event intercepted")    
+                    del(tokens[0])
+                    stationCount = 0
+                    for dataParameter in tokens:
+                        parameterName = dataParameter.split("=")[0]
+                        parameterValue = dataParameter.split("=")[1]
+                        if parameterName == PandoraData.STATION_COUNT:
+                            self.logger.debug("Station count: %s", parameterValue)
+                            stationCount = parameterValue
+                    stationNames = []
+                    for stationIndex in range(0, int(stationCount)):
+                        stationTokenId = "station" + str(stationIndex) + "="
+                        stationToken = [s for s in tokens if stationTokenId in s]
+                        self.logger.debug("  %s: %s", stationTokenId, stationToken)
+                        stationName = stationToken[0][len(stationTokenId):]
+                        self.logger.debug("  stationName: %s", stationName)
+                        stationNames.append(str(stationIndex) + " " + stationName)
+                    self.logger.debug("[processPianobarEvents]  stationNames: %s", stationNames)
+                    self.stationScreen.setSelectedIndex(0)
+                    self.stationScreen.setItems(stationNames)
+                        
                 elif event == PandoraEvent.PANDORA_CONTROLLER_QUIT:
                     self.logger.info("Terminate event received.");
                     self.isPianobarEventThreadRunning = False
@@ -246,7 +334,7 @@ class PandoraController(object):
                 command = self.commandQueue.get(block=True, timeout=5)
                 self.logger.info("Processing command %s", command)
                 commandFifo = open(self.commandFifoPath, "w")
-                commandFifo.write(command)
+                commandFifo.write(command + "\r\n")
                 commandFifo.close()
             except Queue.Empty:
                 pass
@@ -255,50 +343,46 @@ class PandoraController(object):
 
     def refreshDisplay(self):
         self.logger.info("Display thread executing")
-        lastStationTitle = ""
-        lastSongTitle = ""
-        lastArtist = ""
-        lastAlbum = ""
+        previousLine1 = ""
+        previousLine2 = ""
+        previousLine3 = ""
+        previousLine4 = ""
         while self.isRunning and self.isDisplayThreadRunning:
-            self.logger.debug("Display thread: station: %s", self.stationTitle)
-            self.logger.debug("Display thread: song: %s", self.songTitle)
-            self.logger.debug("Display thread: artist: %s", self.artist)
-            self.logger.debug("Display thread: album: %s", self.albumTitle)
-            if self.stationTitle != lastStationTitle:
-                self.logger.info("Station name change.  Was: %s, Now: %s", lastStationTitle, self.stationTitle)
-                self.display.setPosition(PandoraController.STATION_TITLE_POSITION["line"], PandoraController.STATION_TITLE_POSITION["position"])
-                stationTitle = self.stationTitle.ljust(20, ' ')
-                if len(stationTitle) > 20:
-                    stationTitle = stationTitle[:20]
-                self.display.writeString(stationTitle)
-                lastStationTitle = self.stationTitle
+            currentLines = self.currentScreen.getVisibleItems()
+            self.logger.debug("[refreshDisplay] currentLines: %s", currentLines)
 
-            if self.songTitle != lastSongTitle:
-                self.logger.info("Song title change.  Was: %s, Now: %s", lastSongTitle, self.songTitle)
-                songTitle = self.songTitle.ljust(20, ' ')
-                if len(songTitle) > 20:
-                    songTitle = songTitle[:20]
-                self.display.setPosition(PandoraController.SONG_TITLE_POSITION["line"], PandoraController.SONG_TITLE_POSITION["position"])
-                self.display.writeString(songTitle)
-                lastSongTitle = self.songTitle
-
-            if self.artist != lastArtist:
-                self.logger.info("Artist change.  Was: %s, Now: %s", lastArtist, self.artist)
-                artist = self.artist.ljust(20, ' ')
-                if len(artist) > 20:
-                    artist = artist[:20]
-                self.display.setPosition(PandoraController.ARTIST_POSITION["line"], PandoraController.ARTIST_POSITION["position"])
-                self.display.writeString(artist)
-                lastArtist = self.artist
-
-            if self.albumTitle != lastAlbum: 
-                self.logger.info("Album name change.  Was: %s, Now: %s", lastAlbum, self.albumTitle)
-                album = self.albumTitle.ljust(20, ' ')
-                if len(album) > 20:
-                    album = album[:20]
-                self.display.setPosition(PandoraController.ALBUM_TITLE_POSITION["line"], PandoraController.ALBUM_TITLE_POSITION["position"])
-                self.display.writeString(album)
-                lastAlbum = self.albumTitle
+            if previousLine1 != currentLines[0]:
+                self.logger.info("Line 1 text changed.  Was: %s, Now: %s", previousLine1, currentLines[0])
+                self.display.setPosition(PandoraController.LINE_1_POSITION["line"], PandoraController.LINE_2_POSITION["position"])
+                line1 = currentLines[0].ljust(20, ' ')
+                if len(line1) > 20:
+                    line1 = line1[:20]
+                self.display.writeString(line1)
+                previousLine1 = currentLines[0]
+            if previousLine2 != currentLines[1]:
+                self.logger.info("Line 2 text changed.  Was: %s, Now: %s", previousLine2, currentLines[1])
+                self.display.setPosition(PandoraController.LINE_2_POSITION["line"], PandoraController.LINE_2_POSITION["position"])
+                line2 = currentLines[1].ljust(20, ' ')
+                if len(line2) > 20:
+                    line2 = line2[:20]
+                self.display.writeString(line2)
+                previousLine2 = currentLines[1]
+            if previousLine3 != currentLines[2]:
+                self.logger.info("Line 3 text changed.  Was: %s, Now: %s", previousLine3, currentLines[2])
+                self.display.setPosition(PandoraController.LINE_3_POSITION["line"], PandoraController.LINE_3_POSITION["position"])
+                line3 = currentLines[2].ljust(20, ' ')
+                if len(line3) > 20:
+                    line3 = line3[:20]
+                self.display.writeString(line3)
+                previousLine3 = currentLines[2]
+            if previousLine4 != currentLines[3]:
+                self.logger.info("Line 4 text changed.  Was: %s, Now: %s", previousLine4, currentLines[3])
+                self.display.setPosition(PandoraController.LINE_4_POSITION["line"], PandoraController.LINE_4_POSITION["position"])
+                line4 = currentLines[3].ljust(20, ' ')
+                if len(line4) > 20:
+                    line4 = line4[:20]
+                self.display.writeString(line4)
+                previousLine4 = currentLines[3]
             time.sleep(1)
         self.logger.info("Display thread terminating")
 

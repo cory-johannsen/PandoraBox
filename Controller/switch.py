@@ -12,11 +12,11 @@ SwitchPosition = enum.enum(UP="UP", DOWN="DOWN", LEFT="LEFT", RIGHT="RIGHT", CEN
 class NavigationSwitch(object):
 
 
-    def __init__(self, gpioPins={SwitchPosition.UP:"P8_44", 
-                                SwitchPosition.DOWN:"P8_46", 
-                                SwitchPosition.LEFT:"P8_43", 
-                                SwitchPosition.RIGHT:"P8_45", 
-                                SwitchPosition.CENTER:"P8_4"}):
+    def __init__(self, gpioPins={SwitchPosition.UP:"P8_35", 
+                                SwitchPosition.DOWN:"P8_33", 
+                                SwitchPosition.LEFT:"P8_36", 
+                                SwitchPosition.RIGHT:"P8_34", 
+                                SwitchPosition.CENTER:"P8_31"}):
         self.logger = logging.getLogger('PandoraBox.NavigationSwitch')
         self.gpioPins = gpioPins
         self.pinStates = {SwitchPosition.UP:GPIO.LOW, 
